@@ -22,7 +22,13 @@ class Settings(BaseSettings):
     # Message Broker (Redis Streams)
     REDIS_HOST: str = "redis"
     REDIS_PORT: int = 6379
+    REDIS_PASSWORD: Optional[str] = None
+    REDIS_DB: int = 0
     REDIS_STREAM_KEY: str = "shadow_traffic"
+    REDIS_STREAM_MAXLEN: int = 100000
+    REDIS_SOCKET_TIMEOUT: float = 2.0
+    REDIS_CONNECT_TIMEOUT: float = 2.0
+    REDIS_RETRY_ON_TIMEOUT: bool = True
     REDIS_CONSUMER_GROUP: str = "crossverify_workers"
     REDIS_CONSUMER_NAME: str = "worker_1"
     

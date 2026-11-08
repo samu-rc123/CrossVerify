@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="CrossVerify API Gateway",
     description="Enterprise Continuous Verification Engine for Dual-Path LLM Ingress",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan
 )
 
@@ -66,19 +66,22 @@ async def root():
     """Service metadata and ingress status."""
     return {
         "service": "CrossVerify API Gateway",
-        "version": "0.2.0",
+        "version": "0.3.0",
         "status": "operational",
         "champion_model": settings.CHAMPION_MODEL_NAME,
+        "shadow_stream": settings.REDIS_STREAM_KEY,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 
 @app.get("/health", tags=["system"])
 async def health():
-    """Healthcheck endpoint for orchestrators and container probes."""
+    """Healthcheck endpoint reporting service and message broker telemetry."""
+    broker_metrics = traffic_broker.get_metrics()
     return {
         "status": "healthy",
         "service": "gateway",
         "environment": settings.ENVIRONMENT,
+        "broker": broker_metrics,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }

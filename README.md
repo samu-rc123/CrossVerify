@@ -150,8 +150,9 @@ docker-compose up --build -d
 - [x] **Day 2: feat: implement synchronous champion routing**
   - Build OpenAI-compatible `/v1/chat/completions` endpoint in FastAPI.
   - Implemented request/response Pydantic schemas, synchronous Champion client, latency telemetry headers (`X-Request-ID`, `X-CrossVerify-Latency-Ms`), and comprehensive pytest test suite.
-- [ ] **Day 3: feat: integrate async redis stream publisher**
+- [x] **Day 3: feat: integrate async redis stream publisher**
   - Mirror incoming requests to Redis Stream (`shadow_traffic`).
+  - Implemented resilient asynchronous `TrafficBroker` via Redis Streams (`XADD`), stream length capping (`MAXLEN ~ 100000`), dynamic canary circuit breaker gating, non-blocking fault isolation, broker telemetry, and comprehensive pytest test suite (13 passing tests).
 - [ ] **Day 4: feat: initialize candidate worker pool**
   - Background worker consuming from Redis consumer groups.
 - [ ] **Day 5: feat: implement sandboxed candidate inference**
