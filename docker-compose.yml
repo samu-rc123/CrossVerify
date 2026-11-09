@@ -63,6 +63,22 @@ services:
     networks:
       - crossverify_net
 
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    container_name: crossverify-worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - crossverify_net
+
 networks:
   crossverify_net:
     driver: bridge
@@ -72,4 +88,3 @@ volumes:
     driver: local
   redis_data:
     driver: local
-

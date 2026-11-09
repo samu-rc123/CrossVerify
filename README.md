@@ -153,8 +153,9 @@ docker-compose up --build -d
 - [x] **Day 3: feat: integrate async redis stream publisher**
   - Mirror incoming requests to Redis Stream (`shadow_traffic`).
   - Implemented resilient asynchronous `TrafficBroker` via Redis Streams (`XADD`), stream length capping (`MAXLEN ~ 100000`), dynamic canary circuit breaker gating, non-blocking fault isolation, broker telemetry, and comprehensive pytest test suite (13 passing tests).
-- [ ] **Day 4: feat: initialize candidate worker pool**
+- [x] **Day 4: feat: initialize candidate worker pool**
   - Background worker consuming from Redis consumer groups.
+  - Implemented `ShadowConsumer` leveraging Redis consumer groups (`crossverify_workers`), auto-provisioning streams/groups (`XGROUP CREATE ... MKSTREAM`), structured deserialization (`ShadowEvent`), batch reading (`XREADGROUP`), safe message acknowledgement (`XACK`), signal handling, Docker Compose worker service orchestration, and unit tests (22 total passing tests).
 - [ ] **Day 5: feat: implement sandboxed candidate inference**
   - Execute prompts against candidate models in isolated worker context.
 - [ ] **Day 6: feat: provision postgres evaluation schema**
