@@ -156,8 +156,29 @@ async def test_acknowledge_event(consumer):
 
 
 @pytest.mark.anyio
-async def test_process_event(consumer):
-    """Verify processing an event acknowledges it and returns True."""
+async def test_process_event():
+    """Verify end-to-end event processing: candidate inference, semantic evaluation, DB persistence, and ACK."""
+    import numpy as np
+    from worker.clients import SandboxedCandidateClient
+    from worker.db import DatabaseManager
+    from worker.evaluator import EmbeddingEngine, SemanticEvaluator
+
+    db = DatabaseManager(database_url="sqlite+aiosqlite:///:memory:")
+    await db.ensure_schema()
+
+    engine = EmbeddingEngine(
+        dimension=3,
+        encoder_fn=lambda texts: np.array([[1.0, 0.0, 0.0] for _ in texts], dtype=np.float32),
+    )
+    evaluator = SemanticEvaluator(embedding_engine=engine, threshold=0.80)
+    candidate = SandboxedCandidateClient(simulated_latency_ms=5.0, drift_rate=0.0)
+
+    consumer = ShadowConsumer(
+        candidate_client=candidate,
+        semantic_evaluator=evaluator,
+        db_manager=db,
+    )
+
     mock_redis = AsyncMock()
     mock_redis.xack.return_value = 1
     consumer.client = mock_redis
@@ -178,14 +199,84 @@ async def test_process_event(consumer):
     assert success is True
     assert consumer.stats["events_acknowledged"] == 1
     assert consumer.stats["candidate_success"] == 1
+    assert consumer.stats["evaluations_persisted"] == 1
+    assert consumer.stats["discrepancies_detected"] == 0
+
+    record = await db.get_evaluation_by_request_id("chatcmpl-proc-test")
+    assert record is not None
+    assert record.semantic_similarity == 1.0
+    assert record.discrepancy_detected is False
+    assert record.champion_model == "champion-gpt-4o"
+    assert record.candidate_model == candidate.model_name
+    await db.disconnect()
+
+
+@pytest.mark.anyio
+async def test_process_event_drift_detected_and_persisted():
+    """Verify semantic drift detection triggers discrepancy flag and saves telemetry to DB."""
+    import numpy as np
+    from worker.clients import SandboxedCandidateClient
+    from worker.db import DatabaseManager
+    from worker.evaluator import EmbeddingEngine, SemanticEvaluator
+
+    db = DatabaseManager(database_url="sqlite+aiosqlite:///:memory:")
+    await db.ensure_schema()
+
+    def orthogonal_encoder(texts):
+        return np.array(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            dtype=np.float32,
+        )
+
+    engine = EmbeddingEngine(dimension=3, encoder_fn=orthogonal_encoder)
+    evaluator = SemanticEvaluator(embedding_engine=engine, threshold=0.80)
+    candidate = SandboxedCandidateClient(simulated_latency_ms=5.0, drift_rate=1.0)
+
+    consumer = ShadowConsumer(
+        candidate_client=candidate,
+        semantic_evaluator=evaluator,
+        db_manager=db,
+    )
+
+    mock_redis = AsyncMock()
+    mock_redis.xack.return_value = 1
+    consumer.client = mock_redis
+    consumer.is_connected = True
+
+    event = ShadowEvent(
+        message_id="1731140000001-0",
+        request_id="chatcmpl-drift-test",
+        timestamp="2026-11-12T04:00:00Z",
+        model="champion-gpt-4o",
+        prompt="Explain Python generators",
+        messages=[{"role": "user", "content": "Explain Python generators"}],
+        champion_response="Python generators use yield to produce lazy iterators.",
+        champion_latency_ms=40.0
+    )
+
+    success = await consumer.process_event(event)
+    assert success is True
+    assert consumer.stats["discrepancies_detected"] == 1
+    assert consumer.stats["evaluations_persisted"] == 1
+
+    record = await db.get_evaluation_by_request_id("chatcmpl-drift-test")
+    assert record is not None
+    assert record.semantic_similarity == 0.0
+    assert record.discrepancy_detected is True
+    await db.disconnect()
 
 
 @pytest.mark.anyio
 async def test_process_event_candidate_timeout_still_acknowledges():
-    """Verify sandboxed candidate timeout is isolated and event is still ACKed."""
+    """Verify sandboxed candidate timeout is isolated, logged as discrepancy in DB, and ACKed."""
     from worker.clients import SandboxedCandidateClient
+    from worker.db import DatabaseManager
+
+    db = DatabaseManager(database_url="sqlite+aiosqlite:///:memory:")
+    await db.ensure_schema()
+
     slow_candidate = SandboxedCandidateClient(timeout_seconds=0.02, simulated_latency_ms=250.0)
-    consumer = ShadowConsumer(candidate_client=slow_candidate)
+    consumer = ShadowConsumer(candidate_client=slow_candidate, db_manager=db)
 
     mock_redis = AsyncMock()
     mock_redis.xack.return_value = 1
@@ -206,7 +297,16 @@ async def test_process_event_candidate_timeout_still_acknowledges():
     success = await consumer.process_event(event)
     assert success is True
     assert consumer.stats["candidate_failed"] == 1
+    assert consumer.stats["discrepancies_detected"] == 1
+    assert consumer.stats["evaluations_persisted"] == 1
     assert consumer.stats["events_acknowledged"] == 1
+
+    record = await db.get_evaluation_by_request_id("chatcmpl-timeout-test")
+    assert record is not None
+    assert record.semantic_similarity == 0.0
+    assert record.discrepancy_detected is True
+    assert "timed out" in record.error_message.lower()
+    await db.disconnect()
 
 
 @pytest.mark.anyio
@@ -217,8 +317,10 @@ async def test_worker_run_bounded_iterations(consumer):
     consumer.is_connected = True
 
     with patch.object(consumer, "ensure_consumer_group", new_callable=AsyncMock) as mock_group, \
+         patch.object(consumer.db_manager, "ensure_schema", new_callable=AsyncMock) as mock_schema, \
          patch.object(consumer, "read_events", new_callable=AsyncMock) as mock_read:
         mock_group.return_value = True
+        mock_schema.return_value = True
         mock_read.return_value = []
 
         # Run for 2 iterations and verify it exits cleanly
@@ -226,4 +328,5 @@ async def test_worker_run_bounded_iterations(consumer):
 
         assert consumer.is_running is False
         assert mock_group.call_count == 1
+        assert mock_schema.call_count == 1
         assert mock_read.call_count == 2

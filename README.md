@@ -165,8 +165,9 @@ docker-compose up --build -d
 - [x] **Day 7: feat: integrate local embedding generation**
   - Local embedding pipeline using SentenceTransformers (`all-MiniLM-L6-v2`).
   - Implemented thread-safe lazy-loaded `EmbeddingEngine` with `asyncio.to_thread` offloading, batch encoding, L2 normalization, empty-string zero-vector guards, and real model verification tests (35 passing tests).
-- [ ] **Day 8: feat: calculate semantic cosine similarity**
+- [x] **Day 8: feat: calculate semantic cosine similarity**
   - Compute semantic similarity scores and classify discrepancies.
+  - Implemented `SemanticEvaluator` using FAISS `IndexFlatIP` cosine similarity on normalized 384-d embeddings, threshold-based drift flagging, full end-to-end `ShadowConsumer` pipeline (Candidate inference -> Semantic similarity -> PostgreSQL telemetry persistence -> Redis `XACK`), and integration tests.
 - [ ] **Day 9: feat: enforce json schema validation**
   - Structural verification for function-calling and structured LLM payloads.
 - [ ] **Day 10: feat: build sliding window telemetry aggregator**

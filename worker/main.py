@@ -32,6 +32,7 @@ async def main():
 
     logger.info("Starting CrossVerify Candidate Worker...")
     try:
+        await consumer.semantic_evaluator.warm_up()
         await consumer.run()
     except asyncio.CancelledError:
         logger.info("Worker task cancelled.")

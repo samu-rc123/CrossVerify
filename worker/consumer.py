@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 
 from worker.clients import SandboxedCandidateClient, InferenceResult
 from worker.core.config import get_worker_settings
+from worker.db import DatabaseManager
+from worker.evaluator import SemanticEvaluator
 
 logger = logging.getLogger("crossverify.worker.consumer")
 
@@ -65,9 +67,16 @@ class ShadowConsumer:
     using persistent Consumer Groups for scalable, parallel evaluation.
     """
 
-    def __init__(self, candidate_client: Optional[SandboxedCandidateClient] = None):
+    def __init__(
+        self,
+        candidate_client: Optional[SandboxedCandidateClient] = None,
+        semantic_evaluator: Optional[SemanticEvaluator] = None,
+        db_manager: Optional[DatabaseManager] = None,
+    ):
         self.settings = get_worker_settings()
         self.candidate_client = candidate_client or SandboxedCandidateClient()
+        self.semantic_evaluator = semantic_evaluator or SemanticEvaluator()
+        self.db_manager = db_manager or DatabaseManager()
         self.client: Optional[aioredis.Redis] = None
         self.pool: Optional[aioredis.ConnectionPool] = None
         self.is_connected: bool = False
@@ -77,7 +86,9 @@ class ShadowConsumer:
             "events_acknowledged": 0,
             "events_failed": 0,
             "candidate_success": 0,
-            "candidate_failed": 0
+            "candidate_failed": 0,
+            "discrepancies_detected": 0,
+            "evaluations_persisted": 0,
         }
 
     async def connect(self) -> bool:
@@ -108,13 +119,15 @@ class ShadowConsumer:
             return False
 
     async def disconnect(self):
-        """Cleanly close Redis connections."""
+        """Cleanly close Redis and PostgreSQL connections."""
         self.is_running = False
         if self.client:
             await self.client.aclose()
         if self.pool:
             await self.pool.disconnect()
         self.is_connected = False
+        if self.db_manager.is_connected:
+            await self.db_manager.disconnect()
         logger.info("[ShadowConsumer] Disconnected from Redis broker.")
 
     async def ensure_consumer_group(self) -> bool:
@@ -218,7 +231,9 @@ class ShadowConsumer:
         """
         Core event handler for shadowed traffic:
         1. Executes sandboxed inference against the Candidate model.
-        2. Records metrics and acknowledges stream message.
+        2. Evaluates semantic cosine similarity against the Champion baseline.
+        3. Persists telemetry metrics to PostgreSQL.
+        4. Acknowledges the Redis stream message.
         """
         logger.info(
             f"[ShadowConsumer] Ingested shadow event: req_id={event.request_id}, "
@@ -226,7 +241,7 @@ class ShadowConsumer:
             f"champion_latency={event.champion_latency_ms:.2f}ms"
         )
 
-        # Sandboxed Candidate Inference (Day 5)
+        # 1. Sandboxed Candidate Inference (Day 5)
         candidate_result: InferenceResult = await self.candidate_client.generate(
             messages=event.messages,
             prompt=event.prompt,
@@ -234,21 +249,55 @@ class ShadowConsumer:
             max_tokens=event.max_tokens
         )
 
+        # 2. Semantic Discrepancy Evaluation (Days 7-8)
         if candidate_result.success:
             self.stats["candidate_success"] += 1
+            comparison = await self.semantic_evaluator.evaluate(
+                champion_text=event.champion_response,
+                candidate_text=candidate_result.content
+            )
+            similarity_score = comparison.similarity_score
+            discrepancy_detected = comparison.discrepancy_detected
             logger.info(
-                f"[ShadowConsumer] Candidate inference complete: req_id={event.request_id}, "
-                f"candidate_model={candidate_result.model}, "
+                f"[ShadowConsumer] Evaluated req_id={event.request_id}: "
+                f"similarity={similarity_score:.4f}, discrepancy={discrepancy_detected}, "
                 f"candidate_latency={candidate_result.latency_ms:.2f}ms"
             )
         else:
             self.stats["candidate_failed"] += 1
+            similarity_score = 0.0
+            discrepancy_detected = True
             logger.warning(
                 f"[ShadowConsumer] Candidate inference degraded: req_id={event.request_id}, "
                 f"timed_out={candidate_result.timed_out}, error={candidate_result.error_message}"
             )
 
-        # Acknowledge processed message
+        if discrepancy_detected:
+            self.stats["discrepancies_detected"] += 1
+
+        # 3. Persist evaluation telemetry to PostgreSQL (Day 6 & Day 8)
+        saved_record = await self.db_manager.save_evaluation(
+            request_id=event.request_id,
+            champion_model=event.model,
+            candidate_model=candidate_result.model,
+            prompt=event.prompt,
+            champion_response=event.champion_response,
+            candidate_response=candidate_result.content,
+            champion_latency_ms=event.champion_latency_ms,
+            candidate_latency_ms=candidate_result.latency_ms,
+            semantic_similarity=similarity_score,
+            discrepancy_detected=discrepancy_detected,
+            error_message=candidate_result.error_message,
+            metadata={
+                **event.metadata,
+                "stream_message_id": event.message_id,
+                "candidate_timed_out": candidate_result.timed_out,
+            },
+        )
+        if saved_record is not None:
+            self.stats["evaluations_persisted"] += 1
+
+        # 4. Acknowledge processed message
         return await self.acknowledge_event(event.message_id)
 
     async def run(self, max_iterations: Optional[int] = None):
@@ -267,6 +316,8 @@ class ShadowConsumer:
                     logger.error("[ShadowConsumer] Unable to connect to Redis. Retrying in background...")
 
             await self.ensure_consumer_group()
+            if not self.db_manager.is_connected:
+                await self.db_manager.ensure_schema()
 
             iterations = 0
             while self.is_running:
