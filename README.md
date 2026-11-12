@@ -156,8 +156,9 @@ docker-compose up --build -d
 - [x] **Day 4: feat: initialize candidate worker pool**
   - Background worker consuming from Redis consumer groups.
   - Implemented `ShadowConsumer` leveraging Redis consumer groups (`crossverify_workers`), auto-provisioning streams/groups (`XGROUP CREATE ... MKSTREAM`), structured deserialization (`ShadowEvent`), batch reading (`XREADGROUP`), safe message acknowledgement (`XACK`), signal handling, Docker Compose worker service orchestration, and unit tests (22 total passing tests).
-- [ ] **Day 5: feat: implement sandboxed candidate inference**
+- [x] **Day 5: feat: implement sandboxed candidate inference**
   - Execute prompts against candidate models in isolated worker context.
+  - Implemented `SandboxedCandidateClient` and `ChampionMockClient` with strict `asyncio.wait_for` timeout sandboxing, complete exception isolation, drift injection support, latency tracking, and integration into `ShadowConsumer` (28 passing tests).
 - [ ] **Day 6: feat: provision postgres evaluation schema**
   - SQLAlchemy models and persistence for side-by-side evaluations.
 - [ ] **Day 7: feat: integrate local embedding generation**

@@ -177,6 +177,36 @@ async def test_process_event(consumer):
     success = await consumer.process_event(event)
     assert success is True
     assert consumer.stats["events_acknowledged"] == 1
+    assert consumer.stats["candidate_success"] == 1
+
+
+@pytest.mark.anyio
+async def test_process_event_candidate_timeout_still_acknowledges():
+    """Verify sandboxed candidate timeout is isolated and event is still ACKed."""
+    from worker.clients import SandboxedCandidateClient
+    slow_candidate = SandboxedCandidateClient(timeout_seconds=0.02, simulated_latency_ms=250.0)
+    consumer = ShadowConsumer(candidate_client=slow_candidate)
+
+    mock_redis = AsyncMock()
+    mock_redis.xack.return_value = 1
+    consumer.client = mock_redis
+    consumer.is_connected = True
+
+    event = ShadowEvent(
+        message_id="1731140000002-0",
+        request_id="chatcmpl-timeout-test",
+        timestamp="2026-11-12T04:00:00Z",
+        model="champion-gpt-4o",
+        prompt="Slow prompt",
+        messages=[{"role": "user", "content": "Slow prompt"}],
+        champion_response="Fast champion response",
+        champion_latency_ms=30.0
+    )
+
+    success = await consumer.process_event(event)
+    assert success is True
+    assert consumer.stats["candidate_failed"] == 1
+    assert consumer.stats["events_acknowledged"] == 1
 
 
 @pytest.mark.anyio
@@ -194,6 +224,6 @@ async def test_worker_run_bounded_iterations(consumer):
         # Run for 2 iterations and verify it exits cleanly
         await consumer.run(max_iterations=2)
 
-        assert consumer.is_running is True
+        assert consumer.is_running is False
         assert mock_group.call_count == 1
         assert mock_read.call_count == 2

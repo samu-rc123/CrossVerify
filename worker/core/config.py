@@ -1,4 +1,3 @@
-import os
 import uuid
 import socket
 from functools import lru_cache
@@ -27,12 +26,35 @@ class WorkerSettings(BaseSettings):
 
     # PostgreSQL Telemetry Store
     DATABASE_URL: str = "postgresql://postgres:postgres@postgres:5432/crossverify"
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 10
+    DB_ECHO: bool = False
 
     # Canary Circuit Breaker Key
     CANARY_ABORT_KEY: str = "canary:abort_traffic"
 
-    # Candidate Model Name (for Day 5 inference execution)
+    # Sandboxed Candidate Model Settings (Day 5)
     CANDIDATE_MODEL_NAME: str = "candidate-gpt-4o-mini"
+    CANDIDATE_API_KEY: Optional[str] = None
+    CANDIDATE_BASE_URL: Optional[str] = None
+    CANDIDATE_TIMEOUT_SECONDS: float = 15.0
+    CANDIDATE_SIMULATE_LATENCY_MS: float = 85.0
+    CANDIDATE_SIMULATE_DRIFT_RATE: float = 0.0
+
+    # Semantic Discrepancy Engine Settings (Days 7-8)
+    EMBEDDING_MODEL_NAME: str = "all-MiniLM-L6-v2"
+    SEMANTIC_SIMILARITY_THRESHOLD: float = 0.80
+
+    @property
+    def async_database_url(self) -> str:
+        """Normalize Postgres connection URL to asyncpg driver scheme."""
+        if self.DATABASE_URL.startswith("postgresql+asyncpg://"):
+            return self.DATABASE_URL
+        if self.DATABASE_URL.startswith("postgresql://"):
+            return self.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+        if self.DATABASE_URL.startswith("postgres://"):
+            return self.DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
+        return self.DATABASE_URL
 
     model_config = SettingsConfigDict(
         env_file=".env",

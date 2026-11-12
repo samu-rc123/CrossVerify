@@ -8,6 +8,7 @@ import redis.asyncio as aioredis
 from redis.exceptions import RedisError, ResponseError
 from pydantic import BaseModel, Field
 
+from worker.clients import SandboxedCandidateClient, InferenceResult
 from worker.core.config import get_worker_settings
 
 logger = logging.getLogger("crossverify.worker.consumer")
@@ -64,8 +65,9 @@ class ShadowConsumer:
     using persistent Consumer Groups for scalable, parallel evaluation.
     """
 
-    def __init__(self):
+    def __init__(self, candidate_client: Optional[SandboxedCandidateClient] = None):
         self.settings = get_worker_settings()
+        self.candidate_client = candidate_client or SandboxedCandidateClient()
         self.client: Optional[aioredis.Redis] = None
         self.pool: Optional[aioredis.ConnectionPool] = None
         self.is_connected: bool = False
@@ -73,7 +75,9 @@ class ShadowConsumer:
         self.stats = {
             "events_received": 0,
             "events_acknowledged": 0,
-            "events_failed": 0
+            "events_failed": 0,
+            "candidate_success": 0,
+            "candidate_failed": 0
         }
 
     async def connect(self) -> bool:
@@ -212,15 +216,39 @@ class ShadowConsumer:
 
     async def process_event(self, event: ShadowEvent) -> bool:
         """
-        Core event handler for shadowed traffic.
-        (Day 4 logs and ACKs; Day 5 triggers candidate inference; Day 6-8 evaluates and saves).
+        Core event handler for shadowed traffic:
+        1. Executes sandboxed inference against the Candidate model.
+        2. Records metrics and acknowledges stream message.
         """
         logger.info(
             f"[ShadowConsumer] Ingested shadow event: req_id={event.request_id}, "
             f"model={event.model}, prompt='{event.prompt[:40]}...', "
             f"champion_latency={event.champion_latency_ms:.2f}ms"
         )
-        # Successfully acknowledge processed message
+
+        # Sandboxed Candidate Inference (Day 5)
+        candidate_result: InferenceResult = await self.candidate_client.generate(
+            messages=event.messages,
+            prompt=event.prompt,
+            temperature=event.temperature,
+            max_tokens=event.max_tokens
+        )
+
+        if candidate_result.success:
+            self.stats["candidate_success"] += 1
+            logger.info(
+                f"[ShadowConsumer] Candidate inference complete: req_id={event.request_id}, "
+                f"candidate_model={candidate_result.model}, "
+                f"candidate_latency={candidate_result.latency_ms:.2f}ms"
+            )
+        else:
+            self.stats["candidate_failed"] += 1
+            logger.warning(
+                f"[ShadowConsumer] Candidate inference degraded: req_id={event.request_id}, "
+                f"timed_out={candidate_result.timed_out}, error={candidate_result.error_message}"
+            )
+
+        # Acknowledge processed message
         return await self.acknowledge_event(event.message_id)
 
     async def run(self, max_iterations: Optional[int] = None):
@@ -232,38 +260,40 @@ class ShadowConsumer:
             f"[ShadowConsumer] Worker '{self.settings.REDIS_CONSUMER_NAME}' starting consumption loop..."
         )
 
-        if not self.is_connected:
-            connected = await self.connect()
-            if not connected:
-                logger.error("[ShadowConsumer] Unable to connect to Redis. Retrying in background...")
-
-        await self.ensure_consumer_group()
-
-        iterations = 0
-        while self.is_running:
+        try:
             if not self.is_connected:
-                await asyncio.sleep(2.0)
-                await self.connect()
-                await self.ensure_consumer_group()
-                continue
+                connected = await self.connect()
+                if not connected:
+                    logger.error("[ShadowConsumer] Unable to connect to Redis. Retrying in background...")
 
-            events = await self.read_events()
-            for event in events:
-                try:
-                    await self.process_event(event)
-                except Exception as proc_err:
-                    self.stats["events_failed"] += 1
-                    logger.error(f"[ShadowConsumer] Error processing event {event.request_id}: {proc_err}")
+            await self.ensure_consumer_group()
 
-            iterations += 1
-            if max_iterations and iterations >= max_iterations:
-                break
+            iterations = 0
+            while self.is_running:
+                if not self.is_connected:
+                    await asyncio.sleep(2.0)
+                    await self.connect()
+                    await self.ensure_consumer_group()
+                    continue
 
-            # Brief non-blocking yield if no events arrived
-            if not events:
-                await asyncio.sleep(0.05)
+                events = await self.read_events()
+                for event in events:
+                    try:
+                        await self.process_event(event)
+                    except Exception as proc_err:
+                        self.stats["events_failed"] += 1
+                        logger.error(f"[ShadowConsumer] Error processing event {event.request_id}: {proc_err}")
 
-        logger.info(f"[ShadowConsumer] Worker '{self.settings.REDIS_CONSUMER_NAME}' stopped.")
+                iterations += 1
+                if max_iterations and iterations >= max_iterations:
+                    break
+
+                # Brief non-blocking yield if no events arrived
+                if not events:
+                    await asyncio.sleep(0.05)
+        finally:
+            self.is_running = False
+            logger.info(f"[ShadowConsumer] Worker '{self.settings.REDIS_CONSUMER_NAME}' stopped.")
 
     def stop(self):
         """Signal consumer loop to cease execution."""
