@@ -162,8 +162,9 @@ docker-compose up --build -d
 - [x] **Day 6: feat: provision postgres evaluation schema**
   - SQLAlchemy models and persistence for side-by-side evaluations.
   - Implemented async `DatabaseManager` with connection pooling, `EvaluationRecord` ORM schema, incremental SQL migrations (`001_initial_evaluations.sql`, `002_add_model_columns.sql`), fault-tolerant persistence, and in-memory async SQL test coverage (32 passing tests).
-- [ ] **Day 7: feat: integrate local embedding generation**
+- [x] **Day 7: feat: integrate local embedding generation**
   - Local embedding pipeline using SentenceTransformers (`all-MiniLM-L6-v2`).
+  - Implemented thread-safe lazy-loaded `EmbeddingEngine` with `asyncio.to_thread` offloading, batch encoding, L2 normalization, empty-string zero-vector guards, and real model verification tests (35 passing tests).
 - [ ] **Day 8: feat: calculate semantic cosine similarity**
   - Compute semantic similarity scores and classify discrepancies.
 - [ ] **Day 9: feat: enforce json schema validation**
