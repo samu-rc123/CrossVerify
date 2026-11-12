@@ -159,8 +159,9 @@ docker-compose up --build -d
 - [x] **Day 5: feat: implement sandboxed candidate inference**
   - Execute prompts against candidate models in isolated worker context.
   - Implemented `SandboxedCandidateClient` and `ChampionMockClient` with strict `asyncio.wait_for` timeout sandboxing, complete exception isolation, drift injection support, latency tracking, and integration into `ShadowConsumer` (28 passing tests).
-- [ ] **Day 6: feat: provision postgres evaluation schema**
+- [x] **Day 6: feat: provision postgres evaluation schema**
   - SQLAlchemy models and persistence for side-by-side evaluations.
+  - Implemented async `DatabaseManager` with connection pooling, `EvaluationRecord` ORM schema, incremental SQL migrations (`001_initial_evaluations.sql`, `002_add_model_columns.sql`), fault-tolerant persistence, and in-memory async SQL test coverage (32 passing tests).
 - [ ] **Day 7: feat: integrate local embedding generation**
   - Local embedding pipeline using SentenceTransformers (`all-MiniLM-L6-v2`).
 - [ ] **Day 8: feat: calculate semantic cosine similarity**

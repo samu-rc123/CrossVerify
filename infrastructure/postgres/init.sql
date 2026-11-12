@@ -8,6 +8,8 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TABLE IF NOT EXISTS evaluations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     request_id VARCHAR(128) NOT NULL,
+    champion_model VARCHAR(128),
+    candidate_model VARCHAR(128),
     prompt TEXT NOT NULL,
     champion_response TEXT,
     candidate_response TEXT,
@@ -25,4 +27,4 @@ CREATE TABLE IF NOT EXISTS evaluations (
 CREATE INDEX IF NOT EXISTS idx_evaluations_created_at ON evaluations(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_evaluations_request_id ON evaluations(request_id);
 CREATE INDEX IF NOT EXISTS idx_evaluations_discrepancy ON evaluations(discrepancy_detected);
-
+CREATE INDEX IF NOT EXISTS idx_evaluations_models ON evaluations(champion_model, candidate_model);
