@@ -104,21 +104,21 @@ class TrafficBroker:
         2. Automatic stream trimming: Caps stream length to prevent unbounded memory growth.
         3. Canary circuit breaker compliance: Drops shadowing if canary thresholds were breached.
         """
-        # 1. Circuit breaker gate check
-        if await self.is_circuit_breaker_tripped():
-            self.stats["dropped_circuit_breaker"] += 1
-            logger.warning(
-                f"[TrafficBroker] Canary abort flag active. Dropping shadow event for {request_id}."
-            )
-            return None
-
-        # 2. Broker connection verification / recovery
+        # 1. Broker connection verification / recovery
         if not self.client or not self.is_connected:
             connected = await self.connect()
             if not connected:
                 self.stats["failed"] += 1
                 logger.warning(f"[TrafficBroker] Redis not connected. Dropped shadow event {request_id}.")
                 return None
+
+        # 2. Circuit breaker gate check
+        if await self.is_circuit_breaker_tripped():
+            self.stats["dropped_circuit_breaker"] += 1
+            logger.warning(
+                f"[TrafficBroker] Canary abort flag active. Dropping shadow event for {request_id}."
+            )
+            return None
 
         # 3. Extract primary prompt content for direct evaluation
         messages = request_payload.get("messages", [])

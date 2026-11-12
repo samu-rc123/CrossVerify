@@ -1,11 +1,9 @@
-import os
 import time
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
 from gateway.api.routes import router as v1_router
 from gateway.core.config import get_settings
