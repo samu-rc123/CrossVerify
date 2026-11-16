@@ -174,8 +174,9 @@ docker-compose up --build -d
 - [x] **Day 10: feat: build sliding window telemetry aggregator**
   - Continuous telemetry rollups over sliding time windows (5-minute averages).
   - Implemented `TelemetryAggregator` computing rolling 5-minute window metrics from PostgreSQL (drift rate, error rate, p50/p95/p99 latencies, structural pass rate, semantic similarity) with time-cutoff filtering and zero-division safety.
-- [ ] **Day 11: feat: implement dynamic circuit breaker**
+- [x] **Day 11: feat: implement dynamic circuit breaker**
   - Trip abort flag on Redis if semantic drift exceeds 5% or latency spikes.
+  - Implemented `CanaryCircuitBreaker` with finite states (`CLOSED`, `OPEN`, `HALF_OPEN`), statistical guardrails (>5% drift rate, >1500ms p95 latency ceiling, >5% candidate error rate), Redis abort flag synchronization (`canary:abort_traffic`, `canary:state`, `canary:abort_reason`), automated cooldown recovery, manual reset, background controller service (`canary_controller/main.py`), and test coverage (10 passing tests).
 - [ ] **Day 12: feat: enforce gateway canary routing**
   - Gateway dynamically honors circuit breaker status to halt shadowing.
 - [ ] **Day 13: test: load test async queue backpressure**

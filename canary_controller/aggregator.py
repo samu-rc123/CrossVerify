@@ -8,7 +8,7 @@ from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from canary_controller.core.config import get_canary_settings
-from worker.db.models import EvaluationRecord
+from canary_controller.models import EvaluationRecord
 
 logger = logging.getLogger("crossverify.canary.aggregator")
 
