@@ -168,8 +168,9 @@ docker-compose up --build -d
 - [x] **Day 8: feat: calculate semantic cosine similarity**
   - Compute semantic similarity scores and classify discrepancies.
   - Implemented `SemanticEvaluator` using FAISS `IndexFlatIP` cosine similarity on normalized 384-d embeddings, threshold-based drift flagging, full end-to-end `ShadowConsumer` pipeline (Candidate inference -> Semantic similarity -> PostgreSQL telemetry persistence -> Redis `XACK`), and integration tests.
-- [ ] **Day 9: feat: enforce json schema validation**
+- [x] **Day 9: feat: enforce json schema validation**
   - Structural verification for function-calling and structured LLM payloads.
+  - Implemented `StructuralEvaluator` supporting raw & fenced JSON extraction, schema validation via `jsonschema`, implicit/explicit schema enforcement, and telemetry persistence to `evaluations.structural_valid` (10 tests).
 - [ ] **Day 10: feat: build sliding window telemetry aggregator**
   - Continuous telemetry rollups over sliding time windows (5-minute averages).
 - [ ] **Day 11: feat: implement dynamic circuit breaker**

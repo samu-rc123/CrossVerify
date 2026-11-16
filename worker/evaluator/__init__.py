@@ -4,5 +4,15 @@ from worker.evaluator.semantic import (
     SemanticEvaluator,
     SemanticComparisonResult,
 )
+from worker.evaluator.structural import (
+    StructuralEvaluator,
+    StructuralComparisonResult,
+)
 
-__all__ = ["EmbeddingEngine", "SemanticEvaluator", "SemanticComparisonResult"]
+__all__ = [
+    "EmbeddingEngine",
+    "SemanticEvaluator",
+    "SemanticComparisonResult",
+    "StructuralEvaluator",
+    "StructuralComparisonResult",
+]

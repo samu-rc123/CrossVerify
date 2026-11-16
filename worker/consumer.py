@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from worker.clients import SandboxedCandidateClient, InferenceResult
 from worker.core.config import get_worker_settings
 from worker.db import DatabaseManager
-from worker.evaluator import SemanticEvaluator
+from worker.evaluator import SemanticEvaluator, StructuralEvaluator
 
 logger = logging.getLogger("crossverify.worker.consumer")
 
@@ -71,11 +71,13 @@ class ShadowConsumer:
         self,
         candidate_client: Optional[SandboxedCandidateClient] = None,
         semantic_evaluator: Optional[SemanticEvaluator] = None,
+        structural_evaluator: Optional[StructuralEvaluator] = None,
         db_manager: Optional[DatabaseManager] = None,
     ):
         self.settings = get_worker_settings()
         self.candidate_client = candidate_client or SandboxedCandidateClient()
         self.semantic_evaluator = semantic_evaluator or SemanticEvaluator()
+        self.structural_evaluator = structural_evaluator or StructuralEvaluator()
         self.db_manager = db_manager or DatabaseManager()
         self.client: Optional[aioredis.Redis] = None
         self.pool: Optional[aioredis.ConnectionPool] = None
@@ -88,6 +90,7 @@ class ShadowConsumer:
             "candidate_success": 0,
             "candidate_failed": 0,
             "discrepancies_detected": 0,
+            "structural_discrepancies": 0,
             "evaluations_persisted": 0,
         }
 
@@ -272,10 +275,30 @@ class ShadowConsumer:
                 f"timed_out={candidate_result.timed_out}, error={candidate_result.error_message}"
             )
 
+        # 3. Structural JSON & Schema Evaluation (Day 9)
+        expected_schema = (
+            event.metadata.get("json_schema")
+            or event.metadata.get("schema")
+            or event.metadata.get("response_format")
+        )
+        structural_comparison = self.structural_evaluator.evaluate(
+            champion_text=event.champion_response,
+            candidate_text=candidate_result.content,
+            expected_schema=expected_schema if isinstance(expected_schema, dict) else None,
+        )
+        structural_valid = structural_comparison.structural_valid
+        if not structural_valid:
+            discrepancy_detected = True
+            self.stats["structural_discrepancies"] += 1
+            logger.warning(
+                f"[ShadowConsumer] Structural discrepancy for {event.request_id}: "
+                f"{structural_comparison.error_message}"
+            )
+
         if discrepancy_detected:
             self.stats["discrepancies_detected"] += 1
 
-        # 3. Persist evaluation telemetry to PostgreSQL (Day 6 & Day 8)
+        # 4. Persist evaluation telemetry to PostgreSQL (Days 6, 8, 9)
         saved_record = await self.db_manager.save_evaluation(
             request_id=event.request_id,
             champion_model=event.model,
@@ -286,18 +309,21 @@ class ShadowConsumer:
             champion_latency_ms=event.champion_latency_ms,
             candidate_latency_ms=candidate_result.latency_ms,
             semantic_similarity=similarity_score,
+            structural_valid=structural_valid,
             discrepancy_detected=discrepancy_detected,
-            error_message=candidate_result.error_message,
+            error_message=candidate_result.error_message or structural_comparison.error_message,
             metadata={
                 **event.metadata,
                 "stream_message_id": event.message_id,
                 "candidate_timed_out": candidate_result.timed_out,
+                "is_structured": structural_comparison.is_structured,
+                "structural_error": structural_comparison.error_message,
             },
         )
         if saved_record is not None:
             self.stats["evaluations_persisted"] += 1
 
-        # 4. Acknowledge processed message
+        # 5. Acknowledge processed message
         return await self.acknowledge_event(event.message_id)
 
     async def run(self, max_iterations: Optional[int] = None):
