@@ -171,8 +171,9 @@ docker-compose up --build -d
 - [x] **Day 9: feat: enforce json schema validation**
   - Structural verification for function-calling and structured LLM payloads.
   - Implemented `StructuralEvaluator` supporting raw & fenced JSON extraction, schema validation via `jsonschema`, implicit/explicit schema enforcement, and telemetry persistence to `evaluations.structural_valid` (10 tests).
-- [ ] **Day 10: feat: build sliding window telemetry aggregator**
+- [x] **Day 10: feat: build sliding window telemetry aggregator**
   - Continuous telemetry rollups over sliding time windows (5-minute averages).
+  - Implemented `TelemetryAggregator` computing rolling 5-minute window metrics from PostgreSQL (drift rate, error rate, p50/p95/p99 latencies, structural pass rate, semantic similarity) with time-cutoff filtering and zero-division safety.
 - [ ] **Day 11: feat: implement dynamic circuit breaker**
   - Trip abort flag on Redis if semantic drift exceeds 5% or latency spikes.
 - [ ] **Day 12: feat: enforce gateway canary routing**
