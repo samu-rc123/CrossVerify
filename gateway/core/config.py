@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     
     # Canary Circuit Breaker
     CANARY_ABORT_KEY: str = "canary:abort_traffic"
+    CANARY_STATE_KEY: str = "canary:state"
+    CANARY_ABORT_REASON_KEY: str = "canary:abort_reason"
     
     model_config = SettingsConfigDict(
         env_file=".env",

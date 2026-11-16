@@ -8,7 +8,8 @@ from gateway.api.schemas import (
     ChatCompletionResponse,
     ChatCompletionChoice,
     ChatMessage,
-    CompletionUsage
+    CompletionUsage,
+    CanaryStatusResponse
 )
 from gateway.clients.champion_client import champion_client
 from gateway.core.broker import traffic_broker
@@ -52,21 +53,32 @@ async def create_chat_completion(
         max_tokens=request.max_tokens
     )
 
-    # 2. Attach tracing and observability response headers
+    # 2. Dynamic Canary Routing Check
+    canary_aborted = await traffic_broker.is_circuit_breaker_tripped()
+    canary_status = "aborted" if canary_aborted else "active"
+
+    # 3. Attach tracing and observability response headers
     response.headers["X-Request-ID"] = request_id
     response.headers["X-CrossVerify-Model"] = result.model
     response.headers["X-CrossVerify-Latency-Ms"] = f"{result.latency_ms:.2f}"
+    response.headers["X-Canary-Status"] = canary_status
 
-    # 3. Schedule asynchronous traffic mirroring (Day 3 pipeline hook)
-    background_tasks.add_task(
-        traffic_broker.publish_shadow_traffic,
-        request_id=request_id,
-        request_payload=request.model_dump(),
-        champion_response=result.content,
-        champion_latency_ms=result.latency_ms
-    )
+    # 4. Schedule asynchronous traffic mirroring (halted if circuit breaker tripped)
+    if not canary_aborted:
+        background_tasks.add_task(
+            traffic_broker.publish_shadow_traffic,
+            request_id=request_id,
+            request_payload=request.model_dump(),
+            champion_response=result.content,
+            champion_latency_ms=result.latency_ms
+        )
+    else:
+        traffic_broker.stats["dropped_circuit_breaker"] += 1
+        logger.warning(
+            f"Canary routing aborted by circuit breaker. Dropping shadow traffic for {request_id}."
+        )
 
-    # 4. Construct OpenAI-compliant response payload
+    # 5. Construct OpenAI-compliant response payload
     return ChatCompletionResponse(
         id=request_id,
         object="chat.completion",
@@ -89,3 +101,32 @@ async def create_chat_completion(
         ),
         system_fingerprint="fp_crossverify_champion"
     )
+
+
+@router.get(
+    "/canary/status",
+    response_model=CanaryStatusResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get Canary Circuit Breaker & Routing Status",
+    description="Returns live circuit breaker state, abort flag status, trip diagnostics, and traffic broker telemetry."
+)
+async def get_canary_status() -> CanaryStatusResponse:
+    """Query live canary circuit breaker and broker status."""
+    cb_status = await traffic_broker.get_circuit_breaker_status()
+    return CanaryStatusResponse(**cb_status)
+
+
+@router.post(
+    "/canary/reset",
+    status_code=status.HTTP_200_OK,
+    summary="Manually Reset Canary Circuit Breaker",
+    description="Clears Redis abort flags and resets canary circuit breaker state to CLOSED."
+)
+async def reset_canary_circuit_breaker():
+    """Manually clear circuit breaker abort state in Redis."""
+    success = await traffic_broker.reset_circuit_breaker()
+    return {
+        "status": "reset_successful" if success else "reset_failed",
+        "message": "Canary circuit breaker state reset to CLOSED." if success else "Unable to communicate with Redis."
+    }
+

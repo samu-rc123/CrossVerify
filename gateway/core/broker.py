@@ -84,9 +84,74 @@ class TrafficBroker:
 
         try:
             abort_flag = await self.client.get(self.settings.CANARY_ABORT_KEY)
-            return bool(abort_flag and abort_flag.lower() in ("1", "true", "yes", "tripped"))
+            return bool(abort_flag and str(abort_flag).lower() in ("1", "true", "yes", "tripped"))
         except Exception as e:
             logger.warning(f"[TrafficBroker] Failed to check circuit breaker flag: {e}")
+            return False
+
+    async def get_circuit_breaker_status(self) -> Dict[str, Any]:
+        """
+        Query Redis for live canary circuit breaker state, abort flag, and trip diagnostics.
+        """
+        if not self.client or not self.is_connected:
+            connected = await self.connect()
+            if not connected:
+                return {
+                    "state": "UNKNOWN",
+                    "abort_active": False,
+                    "abort_reason": None,
+                    "broker_connected": False,
+                    "broker_stats": self.stats
+                }
+
+        try:
+            abort_val = await self.client.get(self.settings.CANARY_ABORT_KEY)
+            state_val = await self.client.get(self.settings.CANARY_STATE_KEY) or "CLOSED"
+            reason_raw = await self.client.get(self.settings.CANARY_ABORT_REASON_KEY)
+
+            abort_reason = None
+            if reason_raw:
+                try:
+                    abort_reason = json.loads(reason_raw)
+                except Exception:
+                    abort_reason = {"raw": reason_raw}
+
+            is_aborted = bool(abort_val and str(abort_val).lower() in ("1", "true", "yes", "tripped"))
+
+            return {
+                "state": state_val,
+                "abort_active": is_aborted,
+                "abort_reason": abort_reason,
+                "broker_connected": True,
+                "broker_stats": self.stats
+            }
+        except Exception as e:
+            logger.warning(f"[TrafficBroker] Error fetching circuit breaker status: {e}")
+            return {
+                "state": "ERROR",
+                "abort_active": False,
+                "abort_reason": {"error": str(e)},
+                "broker_connected": self.is_connected,
+                "broker_stats": self.stats
+            }
+
+    async def reset_circuit_breaker(self) -> bool:
+        """
+        Manually clear canary abort flag and reset circuit breaker state in Redis.
+        """
+        if not self.client or not self.is_connected:
+            connected = await self.connect()
+            if not connected:
+                return False
+
+        try:
+            await self.client.delete(self.settings.CANARY_ABORT_KEY)
+            await self.client.delete(self.settings.CANARY_ABORT_REASON_KEY)
+            await self.client.set(self.settings.CANARY_STATE_KEY, "CLOSED")
+            logger.info("[TrafficBroker] Canary circuit breaker manually reset to CLOSED.")
+            return True
+        except Exception as e:
+            logger.error(f"[TrafficBroker] Error resetting circuit breaker: {e}")
             return False
 
     async def publish_shadow_traffic(

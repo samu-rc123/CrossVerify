@@ -82,3 +82,13 @@ class ChatCompletionResponse(BaseModel):
         default="fp_crossverify_champion",
         description="Unique system fingerprint"
     )
+
+
+class CanaryStatusResponse(BaseModel):
+    """Canary circuit breaker status and telemetry response schema."""
+    state: str = Field(..., description="Operational state: CLOSED, OPEN, HALF_OPEN, or UNKNOWN")
+    abort_active: bool = Field(..., description="True if canary traffic mirroring is aborted")
+    abort_reason: Optional[Dict[str, Any]] = Field(None, description="Diagnostic reasons if breaker is tripped")
+    broker_connected: bool = Field(..., description="Connection status to Redis broker")
+    broker_stats: Dict[str, Any] = Field(..., description="Broker traffic counters (published, failed, dropped)")
+

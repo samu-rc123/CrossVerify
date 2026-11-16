@@ -136,6 +136,8 @@ docker-compose up --build -d
 - **API Gateway Root:** `http://localhost:8000/`
 - **Gateway Healthcheck:** `http://localhost:8000/health`
 - **Chat Completions:** `POST http://localhost:8000/v1/chat/completions`
+- **Canary Status:** `GET http://localhost:8000/v1/canary/status`
+- **Canary Manual Reset:** `POST http://localhost:8000/v1/canary/reset`
 - **Run Test Suite:**
   ```bash
   pytest
@@ -177,8 +179,15 @@ docker-compose up --build -d
 - [x] **Day 11: feat: implement dynamic circuit breaker**
   - Trip abort flag on Redis if semantic drift exceeds 5% or latency spikes.
   - Implemented `CanaryCircuitBreaker` with finite states (`CLOSED`, `OPEN`, `HALF_OPEN`), statistical guardrails (>5% drift rate, >1500ms p95 latency ceiling, >5% candidate error rate), Redis abort flag synchronization (`canary:abort_traffic`, `canary:state`, `canary:abort_reason`), automated cooldown recovery, manual reset, background controller service (`canary_controller/main.py`), and test coverage (10 passing tests).
-- [ ] **Day 12: feat: enforce gateway canary routing**
+- [x] **Day 12: feat: enforce gateway canary routing**
   - Gateway dynamically honors circuit breaker status to halt shadowing.
+  - Implemented dynamic canary routing enforcement in API Gateway: checking Redis abort flag, injecting `X-Canary-Status: active|aborted` response headers, conditional background task mirroring, endpoints `GET /v1/canary/status` for live circuit breaker diagnostics and `POST /v1/canary/reset` for manual abort reset, and test coverage (7 passing tests).
+- [ ] **Day 13: test: load test async queue backpressure**
+  - High-throughput concurrency tests and backpressure benchmarks.
+- [ ] **Day 14: feat: add grafana observability dashboard**
+  - Visual dashboards for drift metrics, latencies, and circuit breaker status.
+- [ ] **Day 15: docs: architect comprehensive readme**
+  - Production deployment runbook, trade-offs, and failure mode analysis.
 - [ ] **Day 13: test: load test async queue backpressure**
   - High-throughput concurrency tests and backpressure benchmarks.
 - [ ] **Day 14: feat: add grafana observability dashboard**

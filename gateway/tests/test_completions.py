@@ -55,6 +55,8 @@ def test_chat_completions_synchronous_success():
         assert response.headers["X-CrossVerify-Model"] == "champion-gpt-4o"
         assert "X-CrossVerify-Latency-Ms" in response.headers
         assert float(response.headers["X-CrossVerify-Latency-Ms"]) > 0
+        assert "X-Canary-Status" in response.headers
+        assert response.headers["X-Canary-Status"] in ("active", "aborted")
         assert "X-Process-Time-Ms" in response.headers
 
         # Validate OpenAI response schema
