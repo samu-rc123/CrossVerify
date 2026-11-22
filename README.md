@@ -29,38 +29,38 @@ Deploying updated Large Language Models (LLMs) or agentic reasoning checkpoints 
 
 ```mermaid
 flowchart TD
-    Client["Client / User Traffic"] -->|1. POST /v1/chat/completions| Gateway["FastAPI Gateway"]
+    Client["Client / User Traffic"] -->|"1. POST /v1/chat/completions"| Gateway["FastAPI Gateway"]
 
-    subgraph Synchronous Path ["Synchronous Response Path (Zero Latency Penalty)"]
-        Gateway -->|2. Sync Inference| Champion["Champion LLM (Production)"]
-        Champion -->|3. Ground Truth Response| Gateway
-        Gateway -->|4. Immediate 200 OK Response + Telemetry Headers| Client
+    subgraph sync_path ["Synchronous Response Path (Zero Latency Penalty)"]
+        Gateway -->|"2. Sync Inference"| Champion["Champion LLM (Production)"]
+        Champion -->|"3. Ground Truth Response"| Gateway
+        Gateway -->|"4. Immediate 200 OK Response + Telemetry Headers"| Client
     end
 
-    subgraph Dynamic Canary Routing ["Dynamic Canary Routing & Backpressure"]
-        Gateway -->|Check Abort Flag| RedisCB[("Redis (canary:abort_traffic)")]
-        RedisCB -.->|Active / Aborted| Gateway
-        Gateway -->|5. Background Task (If Active)| Broker["TrafficBroker (Redis Streams)"]
+    subgraph canary_routing ["Dynamic Canary Routing & Backpressure"]
+        Gateway -->|"Check Abort Flag"| RedisCB[("Redis (canary:abort_traffic)")]
+        RedisCB -.->|"Active / Aborted"| Gateway
+        Gateway -->|"5. Background Task (If Active)"| Broker["TrafficBroker (Redis Streams)"]
     end
 
-    subgraph Message Broker ["Asynchronous Event Streaming"]
-        Broker -->|6. XADD maxlen ~ 100k| Stream[("Redis Stream: shadow_traffic")]
+    subgraph message_broker ["Asynchronous Event Streaming"]
+        Broker -->|"6. XADD maxlen ~ 100k"| Stream[("Redis Stream: shadow_traffic")]
     end
 
-    subgraph Distributed Worker Pool ["Candidate Worker Pool (Consumer Group)"]
-        Stream -->|7. XREADGROUP crossverify_workers| Consumer["ShadowConsumer"]
-        Consumer -->|8. Sandboxed Inference (timeout <= 2.0s)| Candidate["Candidate LLM (Sandboxed)"]
-        Consumer -->|9. Dense Vector Embedding| SentenceTransformers["SentenceTransformers (384-d)"]
-        SentenceTransformers -->|10. Cosine Similarity| FAISS["FAISS IndexFlatIP"]
-        Consumer -->|11. JSON Schema Validation| SchemaValidator["StructuralEvaluator (Draft202012)"]
-        Consumer -->|12. XACK| Stream
+    subgraph worker_pool ["Candidate Worker Pool (Consumer Group)"]
+        Stream -->|"7. XREADGROUP crossverify_workers"| Consumer["ShadowConsumer"]
+        Consumer -->|"8. Sandboxed Inference (timeout <= 2.0s)"| Candidate["Candidate LLM (Sandboxed)"]
+        Consumer -->|"9. Dense Vector Embedding"| SentenceTransformers["SentenceTransformers (384-d)"]
+        SentenceTransformers -->|"10. Cosine Similarity"| FAISS["FAISS IndexFlatIP"]
+        Consumer -->|"11. JSON Schema Validation"| SchemaValidator["StructuralEvaluator (Draft202012)"]
+        Consumer -->|"12. XACK"| Stream
     end
 
-    subgraph Telemetry & Governance ["Telemetry Store & Canary Governance"]
-        Consumer -->|13. Persist EvaluationRecord| Postgres[("PostgreSQL 16 (evaluations)")]
-        Canary["Canary Controller (Sliding Window Aggregator)"] -->|14. Query 5m Rolling Window| Postgres
-        Canary -->|15. Trip OPEN if Drift > 5% or p95 > 1500ms| RedisCB
-        Grafana["Grafana 10.4 Dashboard"] -->|16. Live Telemetry Queries| Postgres
+    subgraph telemetry_governance ["Telemetry Store & Canary Governance"]
+        Consumer -->|"13. Persist EvaluationRecord"| Postgres[("PostgreSQL 16 (evaluations)")]
+        Canary["Canary Controller (Sliding Window Aggregator)"] -->|"14. Query 5m Rolling Window"| Postgres
+        Canary -->|"15. Trip OPEN if Drift > 5% or p95 > 1500ms"| RedisCB
+        Grafana["Grafana 10.4 Dashboard"] -->|"16. Live Telemetry Queries"| Postgres
     end
 ```
 
