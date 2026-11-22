@@ -96,8 +96,8 @@ flowchart TD
 
 ### 2.4 Automated Canary Controller & SLO Governance (`canary_controller/`)
 - **Sliding Window Aggregator (`canary_controller/aggregator.py`):** Continuously rolls a 5-minute statistical window over PostgreSQL `evaluations`:
-  $$\text{Drift Rate} = \frac{\sum \mathbb{I}(\text{discrepancy\_detected})}{\text{Total Window Samples}}$$
-  $$\text{Error Rate} = \frac{\sum \mathbb{I}(\text{candidate\_error} \lor \text{timeout})}{\text{Total Window Samples}}$$
+  $$\text{Drift Rate} = \frac{\sum \mathbb{I}(\text{discrepancy detected})}{\text{Total Window Samples}}$$
+  $$\text{Error Rate} = \frac{\sum \mathbb{I}(\text{candidate error} \lor \text{timeout})}{\text{Total Window Samples}}$$
   Calculates candidate latency percentiles ($p50, p95, p99$) and mean champion latency using NumPy.
 - **Dynamic Circuit Breaker (`canary_controller/circuit_breaker.py`):**
   - **States:** `CLOSED` (Healthy, traffic shadowed), `OPEN` (Tripped, shadowing halted), `HALF_OPEN` (Cooldown probe).
