@@ -416,40 +416,182 @@ pytest
 
 ---
 
-## 10. Completed 15-Day Engineering Roadmap
+## 10. Production Deployment & Kubernetes Architecture
 
-- [x] **Day 1: chore: init repo and docker compose stack** (`6d1071c`)
-  - Git repository structure, `.gitignore`, `.env.example`, `docker-compose.yml` (PostgreSQL 16, Redis 7, Gateway skeleton), `init.sql`, and architecture documentation.
-- [x] **Day 2: feat: implement synchronous champion routing** (`456ade8`)
-  - OpenAI-compatible `/v1/chat/completions` endpoint in FastAPI.
-  - Implemented request/response Pydantic schemas, synchronous Champion client, and latency telemetry headers (`X-Request-ID`, `X-CrossVerify-Latency-Ms`).
-- [x] **Day 3: feat: integrate async redis stream publisher** (`cd21fb1`)
-  - Resilient asynchronous `TrafficBroker` via Redis Streams (`XADD`).
-  - Stream length capping (`MAXLEN ~ 100000`), dynamic canary circuit breaker gating, and non-blocking fault isolation.
-- [x] **Day 4: feat: initialize candidate worker pool** (`8449aca`)
-  - Background worker consuming from Redis consumer groups (`crossverify_workers`).
-  - Auto-provisioning streams/groups (`XGROUP CREATE ... MKSTREAM`), structured deserialization (`ShadowEvent`), batch reading (`XREADGROUP`), and safe acknowledgements (`XACK`).
-- [x] **Day 5: feat: implement sandboxed candidate inference** (`b0708d6`)
-  - `SandboxedCandidateClient` with strict `asyncio.wait_for` timeout sandboxing, complete exception isolation, drift injection support, and latency tracking.
-- [x] **Day 6: feat: provision postgres evaluation schema** (`beb5a26`)
-  - Async `DatabaseManager` with connection pooling, `EvaluationRecord` ORM schema, and incremental SQL migrations.
-- [x] **Day 7: feat: integrate local embedding generation** (`0bfe7a3`)
-  - Local embedding pipeline using SentenceTransformers (`all-MiniLM-L6-v2`).
-  - Thread-safe lazy-loaded `EmbeddingEngine` with `asyncio.to_thread` offloading, batch encoding, and L2 normalization.
-- [x] **Day 8: feat: calculate semantic cosine similarity** (`f7e0566`)
-  - Hardware-accelerated `SemanticEvaluator` using FAISS `IndexFlatIP` cosine similarity on normalized 384-d embeddings.
-  - Threshold-based drift flagging ($< 0.82$) and full end-to-end consumer persistence pipeline.
-- [x] **Day 9: feat: enforce json schema validation** (`6e684e2`)
-  - `StructuralEvaluator` supporting raw and markdown-fenced JSON extraction, schema validation via `jsonschema.Draft202012Validator`, and persistence to `evaluations.structural_valid`.
-- [x] **Day 10: feat: build sliding window telemetry aggregator** (`5e6bae9`)
-  - `TelemetryAggregator` computing rolling 5-minute window metrics from PostgreSQL (drift rate, error rate, p50/p95/p99 latencies, structural pass rate, semantic similarity).
-- [x] **Day 11: feat: implement dynamic circuit breaker** (`5ec4475`)
-  - `CanaryCircuitBreaker` with finite states (`CLOSED`, `OPEN`, `HALF_OPEN`), statistical guardrails (>5% drift rate, >1500ms p95 latency ceiling, >5% candidate error rate), Redis abort flag synchronization (`canary:abort_traffic`, `canary:state`, `canary:abort_reason`), automated cooldown recovery, and background controller daemon (`canary_controller/main.py`).
-- [x] **Day 12: feat: enforce gateway canary routing** (`055d4b1`)
-  - Dynamic canary routing enforcement in API Gateway: checks Redis abort flag, injects `X-Canary-Status: active|aborted` response headers, conditional background task mirroring, and endpoints `GET /v1/canary/status` and `POST /v1/canary/reset`.
-- [x] **Day 13: test: load test async queue backpressure** (`e6c6ec2`)
-  - High-throughput concurrency testing suite (`tests/test_backpressure.py`): 200 concurrent burst floods, stream capping memory bounds (`MAXLEN=100000`), mid-flight circuit breaker traffic shedding, fault injection for broker partitions, worker batch backlog ingestion (100 events), slow candidate timeout isolation, and standalone CLI benchmark utility (`scripts/load_test.py`).
-- [x] **Day 14: feat: add grafana observability dashboard** (`2593669`)
-  - Auto-provisioned Grafana observability service connected to PostgreSQL (`infrastructure/grafana/`): automated datasource, dashboard provider, comprehensive 8-panel telemetry dashboard (`crossverify_telemetry.json`) tracking rolling drift rates, Champion vs Candidate latencies, error rates, and live discrepancy audit log table.
-- [x] **Day 15: docs: architect comprehensive readme**
-  - Comprehensive MAANG-level system architecture documentation, mathematical discrepancy formulations, queue backpressure analysis, trade-off analysis, operational runbook, and full roadmap verification.
+For mission-critical production environments, CrossVerify is designed to run on Kubernetes with automated scaling and fault tolerance:
+
+```
+                                  [ Ingress Controller (TLS 1.3) ]
+                                                |
+                               +----------------+----------------+
+                               |                                 |
+                     [ Gateway Deployment ]            [ Grafana Dashboard ]
+                     (HPA: CPU & Latency)              (Port 3000 / Ingress)
+                               |
+            +------------------+------------------+
+            |                                     |
+    [ Champion LLM Service ]             [ Redis Cluster / Sentinel ]
+    (Internal Production VPC)             (Stream: shadow_traffic)
+                                                  |
+                                         [ Consumer Group Lag ]
+                                                  |
+                                      [ Worker Pool Deployment ]
+                                      (HPA: Scaled on Queue Lag)
+                                                  |
+                                   +--------------+--------------+
+                                   |                             |
+                       [ Candidate LLM Pods ]          [ Discrepancy Engine ]
+                       (Isolated Sandboxes)            (Local FAISS & GPU/CPU)
+                                   \                             /
+                                    \                           /
+                                   [ PostgreSQL + pgBouncer ]
+                                                |
+                                   [ Canary Controller Pod ]
+                                  (Leader-Elected Daemon)
+```
+
+### 10.1 Autoscaling Strategies
+- **Gateway Scaling:** Scaled via Kubernetes Horizontal Pod Autoscaler (HPA) targeting 70% CPU utilization and HTTP request rate.
+- **Worker Scaling on Consumer Lag:** Workers scale dynamically based on the pending queue backlog depth in Redis using KEDA (Kubernetes Event-driven Autoscaling):
+  ```yaml
+  apiVersion: keda.sh/v1alpha1
+  kind: ScaledObject
+  metadata:
+    name: crossverify-worker-scaler
+  spec:
+    scaleTargetRef:
+      name: crossverify-worker
+    minReplicaCount: 2
+    maxReplicaCount: 20
+    triggers:
+      - type: redis-streams
+        metadata:
+          address: redis:6379
+          stream: shadow_traffic
+          consumerGroup: crossverify_workers
+          pendingEntriesCount: "50"
+  ```
+- **Canary Controller High Availability:** Runs as a singleton with Kubernetes `Replicas: 1` or active-passive leader election via Redis locks to ensure deterministic sliding window evaluations without duplicate state transitions.
+
+---
+
+## 11. Security, Compliance & Data Privacy
+
+Production LLM traffic often contains proprietary enterprise data, end-user personal information, or regulated records (HIPAA/GDPR/SOC2). CrossVerify adheres to strict enterprise privacy standards:
+
+1. **Air-Gapped Local Inference & Zero Third-Party Telemetry:**
+   All semantic discrepancy calculations and vector embeddings run strictly on-premise or within your isolated VPC using local `SentenceTransformers` (`all-MiniLM-L6-v2`) and local FAISS indexes. Model weights are cached locally; no prompt text or embeddings are ever sent to external cloud APIs.
+2. **Payload Anonymization & PII Redaction:**
+   The `TrafficBroker` includes pre-publish sanitization hooks allowing enterprise tokenizers or regex scrubbers (e.g., Presidio, spaCy) to mask credit cards, social security numbers, or internal credentials before stream insertion.
+3. **Defense-in-Depth Network Isolation:**
+   The Candidate model runs inside an isolated network sandbox. It has no inbound ingress permissions and can only be invoked by the worker pool. Even if a candidate model suffers from prompt injection or vulnerability exploitation, it has no lateral network access to the primary production database or client ingress.
+4. **Data Retention & Encryption:**
+   PostgreSQL telemetry records can be partitioned by date and purged automatically via retention policies (e.g., 30-day rolling TTL). All inter-service traffic supports mTLS, and PostgreSQL supports transparent volume encryption (AES-256).
+
+---
+
+## 12. Extensibility & Custom Evaluator Plugins
+
+CrossVerify is architected around modular evaluation strategies. You can easily plug in domain-specific evaluators alongside the default semantic and structural engines.
+
+### 12.1 Registering a Custom Evaluator
+Implement the base evaluation interface:
+```python
+from typing import Dict, Any, Optional
+from pydantic import BaseModel
+
+class CustomEvaluationResult(BaseModel):
+    is_valid: bool
+    score: float
+    reason: Optional[str] = None
+    metadata: Dict[str, Any] = {}
+
+class ToxicityAndSafetyEvaluator:
+    """Custom pluggable safety & compliance guardrail."""
+    def __init__(self, threshold: float = 0.95):
+        self.threshold = threshold
+
+    async def evaluate(self, prompt: str, candidate_response: str) -> CustomEvaluationResult:
+        # Custom classification logic, regex, or specialized safety classifier
+        is_safe = "DROP TABLE" not in candidate_response and "malicious" not in candidate_response
+        return CustomEvaluationResult(
+            is_valid=is_safe,
+            score=1.0 if is_safe else 0.0,
+            reason=None if is_safe else "Flagged by security guardrail"
+        )
+```
+
+Integrate into `worker/consumer.py` by adding the evaluator to `process_event()`, and persist the custom results directly into `EvaluationRecord.extra_metadata`.
+
+---
+
+## 13. Automated Canary Rollout & CI/CD Promotion Workflows
+
+CrossVerify turns chaotic LLM deployments into deterministic CI/CD release pipelines:
+
+```
+[ Git Push: New Candidate Checkpoint ]
+                  |
+                  v
+       [ Build & Deploy Candidate ]
+       (Shadow Traffic Ingress: 100%)
+                  |
+                  v
+       [ CrossVerify Verification Window ]
+       - 24-Hour Continuous Evaluation
+       - Semantic Drift Rate <= 2.0%
+       - Schema Pass Rate >= 99.5%
+       - Candidate p95 Latency <= 1200ms
+                  |
+       +----------+----------+
+       |                     |
+[ SLOs Satisfied ]     [ SLOs Breached ]
+       |                     |
+       v                     v
+[ Automated Promotion ] [ Circuit Breaker Trip ]
+- Gateway Promotes      - Halt Shadowing
+  Candidate -> Champion - Alert PagerDuty / Slack
+- Commit GitOps Repo    - Auto-Rollback Release
+```
+
+### 13.1 Webhook Alerting
+When the Canary Circuit Breaker trips `OPEN`, the controller dispatches an event webhook to your alerting infrastructure:
+- **Slack Alert:** Notifies `#ml-deployments` with drift percentages, p95 latency spike figures, and candidate error logs.
+- **PagerDuty Incident:** Triggers high-priority incident triage if production Champion degradation is suspected.
+- **ArgoCD / Spinnaker Rollback Hook:** Automatically rolls back the candidate deployment manifest.
+
+---
+
+## 14. Troubleshooting & Operational FAQ
+
+### Q1: Why did the Gateway return `X-Canary-Status: aborted`?
+**Answer:** The Canary Circuit Breaker tripped because rolling metrics breached one of your safety thresholds:
+- Semantic drift rate exceeded `CANARY_DRIFT_THRESHOLD` (default: 5.0%).
+- Candidate $p95$ latency exceeded `CANARY_LATENCY_SPIKE_MS` (default: 1500ms).
+- Candidate error rate exceeded `CANARY_MAX_ERROR_RATE` (default: 5.0%).
+
+Inspect the root cause by querying the live status endpoint:
+```bash
+curl http://localhost:8000/v1/canary/status
+```
+The `abort_reason` JSON field will display the exact violation and metric values that caused the trip.
+
+### Q2: How do I manually reset the circuit breaker after resolving an issue?
+**Answer:** Use the authenticated reset endpoint:
+```bash
+curl -X POST http://localhost:8000/v1/canary/reset
+```
+This clears `canary:abort_traffic` and `canary:abort_reason` from Redis and sets the breaker state back to `CLOSED`.
+
+### Q3: What happens if Redis goes down?
+**Answer:** The API Gateway is designed with non-blocking fault isolation. If Redis becomes unreachable, `TrafficBroker` catches the connection error, increments internal failure counters, and logs a warning. **End-user requests to `/v1/chat/completions` continue succeeding with Champion responses without any added latency or downtime.**
+
+### Q4: How does CrossVerify handle large JSON responses?
+**Answer:** `StructuralEvaluator` parses both raw JSON objects and markdown-fenced code blocks (` ```json ... ``` `). If a model produces preamble text before the JSON payload, regex heuristics isolate the JSON structure and validate it against the target schema.
+
+### Q5: How do I adjust the semantic similarity threshold?
+**Answer:** The default cosine similarity threshold is `0.82` (calibrated for `all-MiniLM-L6-v2` embeddings). You can adjust this in `.env`:
+```env
+SEMANTIC_DRIFT_THRESHOLD=0.85
+```
+Higher values enforce stricter semantic equivalence, while lower values tolerate broader stylistic paraphrase variance.
