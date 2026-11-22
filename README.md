@@ -182,15 +182,11 @@ docker-compose up --build -d
 - [x] **Day 12: feat: enforce gateway canary routing**
   - Gateway dynamically honors circuit breaker status to halt shadowing.
   - Implemented dynamic canary routing enforcement in API Gateway: checking Redis abort flag, injecting `X-Canary-Status: active|aborted` response headers, conditional background task mirroring, endpoints `GET /v1/canary/status` for live circuit breaker diagnostics and `POST /v1/canary/reset` for manual abort reset, and test coverage (7 passing tests).
-- [ ] **Day 13: test: load test async queue backpressure**
+- [x] **Day 13: test: load test async queue backpressure**
   - High-throughput concurrency tests and backpressure benchmarks.
+  - Implemented comprehensive async queue load testing suite (`tests/test_backpressure.py`): 200 concurrent burst floods, stream capping memory bounds (`MAXLEN=100000`), mid-flight circuit breaker traffic shedding, fault injection for broker partitions, worker batch backlog ingestion (100 events), slow candidate timeout isolation, and end-to-end gateway load simulation (7 passing tests). Created standalone CLI benchmark utility (`scripts/load_test.py`).
 - [ ] **Day 14: feat: add grafana observability dashboard**
   - Visual dashboards for drift metrics, latencies, and circuit breaker status.
 - [ ] **Day 15: docs: architect comprehensive readme**
   - Production deployment runbook, trade-offs, and failure mode analysis.
-- [ ] **Day 13: test: load test async queue backpressure**
-  - High-throughput concurrency tests and backpressure benchmarks.
-- [ ] **Day 14: feat: add grafana observability dashboard**
-  - Visual dashboards for drift metrics, latencies, and circuit breaker status.
-- [ ] **Day 15: docs: architect comprehensive readme**
   - Production deployment runbook, trade-offs, and failure mode analysis.
