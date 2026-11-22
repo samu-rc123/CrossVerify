@@ -14,3 +14,4 @@ datasources:
       password: postgres
     isDefault: true
     editable: true
+

@@ -97,3 +97,4 @@ def test_docker_compose_grafana_service():
     assert "postgres" in grafana["depends_on"]
     assert "volumes" in dc
     assert "grafana_data" in dc["volumes"]
+
